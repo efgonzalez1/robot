@@ -34,7 +34,7 @@ const rodVolumeInput = document.getElementById("rod-volume");
 const rodMassInput = document.getElementById("rod-mass");
 const rodInertiaCenterOfMassInput = document.getElementById("rod-I-cm");
 const rodInertiaPivotInput = document.getElementById("rod-I-pivot");
-const totalInertia = document.getElementById("total-I");
+const totalInertiaInput = document.getElementById("total-I");
 const angleRadiansInput = document.getElementById("angle-radians");
 const ballPositionXInput = document.getElementById("ball-x");
 const ballPositionYInput = document.getElementById("ball-y");
@@ -48,6 +48,36 @@ const travelDistanceInput = document.getElementById("travel-distance");
 
 // Physics utilities
 const gravity = -9.8; // m/s^2
+
+const getPositions = (
+  initialPositionX,
+  initialPositionY,
+  initialVelocityX,
+  initialVelocityY,
+  totalTime,
+  numberOfPoints
+) => {
+  let xPositions = [];
+  let yPositions = [];
+  const dt = totalTime / (numberOfPoints - 1);
+
+  // Calculate the x and y positions at various points in time
+  for (let i = 0; i < numberOfPoints; i++) {
+    const time = i * dt;
+    const xPosition = initialPositionX + initialVelocityX * time;
+    const yPosition =
+      initialPositionY +
+      initialVelocityY * time +
+      (1 / 2) * gravity * Math.pow(time, 2);
+    xPositions.push(xPosition);
+    yPositions.push(yPosition);
+  }
+
+  return {
+    x: xPositions,
+    y: yPositions,
+  };
+};
 
 const solveQuadratic = (a, b, c) => {
   const b2 = Math.pow(b, 2);
@@ -79,8 +109,8 @@ let drawRobot = () => {
   // Convert the robot height in meters to pixels and adjust for the canvas coordinate system
   const robotHeightMeters = parseFloat(robotHeightInput.value);
   const robotHeightPixels = -1 * meterToPixel(robotHeightMeters);
-  const robotWidth = 100;
-  const robotX = 25;
+  const robotWidth = 50;
+  const robotX = 100;
   const robotY = canvas.height;
 
   // Draw the robot as a rectangle
@@ -88,27 +118,73 @@ let drawRobot = () => {
   ctx.fillRect(robotX, robotY, robotWidth, robotHeightPixels);
 
   // Draw the pivot
-  const pivotRadius = 5;
+  const pivotRadius = 2;
   const pivotCenterX = robotX + robotWidth / 2;
   const pivotCenterY = robotY + robotHeightPixels;
   ctx.beginPath();
   ctx.arc(pivotCenterX, pivotCenterY, pivotRadius, 0, 2 * Math.PI, false);
   ctx.fillStyle = "#000000";
   ctx.fill();
+  ctx.save();
 
-  // Draw the rod as a rotated rectangle
-  const rodAngleDegrees = 270 - parseFloat(angleDegreesInput.value); // Adjust for canvas coordinate system
-  const rodAngleRadians = (rodAngleDegrees * Math.PI) / 180;
-  const rodLength = meterToPixel(parseFloat(rodLengthInput.value)) * 25; // Not to scale :o
-  const rodPivotLength =
-    meterToPixel(parseFloat(rodPivotLengthInput.value)) * 25; // Not to scale :o
+  // Draw the rod as a rotated rectangle centered about the pivot and also draw the ball at the end of the rod.
+  // Note: We're adjusting the canvas coordinate system here to make it easier to draw these pieces.
+  const initialRodAngleRadians = parseFloat(angleRadiansInput.value);
+  const adjustedRodAngleRadians = (3 * Math.PI) / 2 - initialRodAngleRadians; // Adjust by 270 degrees for the canvas coordinate system
+  const rodLength = meterToPixel(parseFloat(rodLengthInput.value));
+  const rodPivotLength = meterToPixel(parseFloat(rodPivotLengthInput.value));
   const rodRadius = meterToPixel(parseFloat(rodRadiusInput.value));
   const rodWidth = rodRadius * 2;
-  ctx.translate(pivotCenterX, pivotCenterY);
-  ctx.rotate(rodAngleRadians);
-  ctx.translate(-1 * pivotCenterX, -1 * pivotCenterY);
-  ctx.fillStyle = "#CCCCCC";
-  ctx.fillRect(pivotCenterX, pivotCenterY, rodWidth, rodLength);
+  const pivotOffset = rodLength - rodPivotLength;
+  const pivotOffsetX = pivotOffset * Math.cos(initialRodAngleRadians);
+  const pivotOffsetY = pivotOffset * Math.sin(initialRodAngleRadians);
+  const translateX = pivotCenterX - pivotOffsetX;
+  const translateY = pivotCenterY + pivotOffsetY;
+  ctx.beginPath();
+  ctx.translate(translateX, translateY);
+  ctx.rotate(adjustedRodAngleRadians);
+  ctx.translate(-translateX, -translateY);
+  ctx.fillStyle = "#7A7F80";
+  ctx.fillRect(translateX, translateY, rodWidth, rodLength);
+
+  const ballRadius = meterToPixel(parseFloat(ballRadiusInput.value));
+  const ballCenterX = translateX;
+  const ballCenterY = translateY + rodLength - ballRadius;
+  ctx.arc(ballCenterX, ballCenterY, ballRadius, 0, 2 * Math.PI, false);
+  ctx.fillStyle = "#ADB2BD";
+  ctx.fill();
+
+  // Draw the path of the ball using the original coordinate system
+  ctx.restore();
+  const initialPositionX = parseFloat(ballPositionXInput.value);
+  const initialPositionY = parseFloat(ballPositionYInput.value);
+  const initialVelocityX = parseFloat(initialVelocityXInput.value);
+  const initialVelocityY = parseFloat(initialVelocityYInput.value);
+  const totalTime = parseFloat(travelTimeInput.value);
+  const numberOfPoints = 100;
+  const data = getPositions(
+    initialPositionX,
+    initialPositionY,
+    initialVelocityX,
+    initialVelocityY,
+    totalTime,
+    numberOfPoints
+  );
+  ctx.fillStyle = "red";
+  for (let i = 0; i < data.x.length; i++) {
+    const x = meterToPixel(data.x[i]);
+    const y = meterToPixel(data.y[i]);
+    ctx.beginPath();
+    ctx.arc(
+      pivotCenterX + ballRadius + x,
+      canvas.height + ballRadius - y,
+      1,
+      0,
+      2 * Math.PI,
+      false
+    );
+    ctx.fill();
+  }
 };
 
 // Calculations
@@ -195,12 +271,14 @@ const updateMotorCalculations = () => {
   const angularVelocity = (torque * timeToSpinMotor) / totalInertia; // rad/s
 
   // Update the UI
+  totalInertiaInput.value = totalInertia.toExponential(5);
   timeToSpinMotorInput.value = timeToSpinMotor.toExponential(5);
   angularVelocityInput.value = angularVelocity.toExponential(5);
 };
 
 const updateKinematicsCalculations = () => {
   // Calculate the tangential velocity and the corresponding x and y components
+  const ballPositionX = parseFloat(ballPositionXInput.value);
   const ballPositionY = parseFloat(ballPositionYInput.value);
   const angularVelocity = parseFloat(angularVelocityInput.value);
   const adjustedAngleRadians =
@@ -217,7 +295,7 @@ const updateKinematicsCalculations = () => {
   const c = ballPositionY;
   const times = solveQuadratic(a, b, c);
   const travelTime = Math.max(...times); // s
-  const travelDistance = initialVelocityX * travelTime; // m
+  const travelDistance = ballPositionX + initialVelocityX * travelTime; // m
 
   // Update the UI
   tangentialVelocityInput.value = tangentialVelocity.toExponential(5);
